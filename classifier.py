@@ -10,7 +10,7 @@ import time
 from chest_xray_model import chest_xray_model
 
 from ChestXrayDataset import ChestXrayDataset
-
+from custom_cnn import custom_cnn
 
 HELP_DESCRIPTION = f"""Classifies chest X-ray images as healthy or having pneumonia"""
 
@@ -42,19 +42,16 @@ def get_extended_resnet18_model():
 
     return model
 
-def load_data():
+
+def get_custom_cnn():
+    model = custom_cnn(224)
+    return model
+
+def load_data(transform):
     """
     Load the data. Generate training, validation and test datasets.
-    Apply basic transformation to the data to feed it to ResNet18
+    Apply basic transformation to the data to feed it to model
     """
-    transform = transforms.Compose([
-    transforms.Resize((224, 224)),            # Resize to fit model input size (e.g., 224x224 for ResNet)
-    transforms.ToTensor(),                    # Convert image to a PyTorch tensor
-    transforms.Grayscale(num_output_channels=3),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Normalize images based on how ResNet18 is trained
-    transforms.RandomHorizontalFlip()         # Random horizontal flip for data augmentation
-    ]) 
-
     train_dataset = ChestXrayDataset(is_training_set=True, transform=transform)
     print(f"Showing some images from training data")
     train_dataset.show_images()
@@ -74,6 +71,29 @@ def load_data():
     
     return train_loader, val_loader, test_loader 
 
+def get_transform(model_name):
+    """
+    Build a data transformer based on the model type
+    """
+    if "resnet18" in model_name:
+        transform = transforms.Compose([
+        transforms.Resize((224, 224)),            # Resize to fit model input size (e.g., 224x224 for ResNet)
+        transforms.ToTensor(),                    # Convert image to a PyTorch tensor
+        transforms.Grayscale(num_output_channels=3),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Normalize images based on how ResNet18 is trained
+        transforms.RandomHorizontalFlip()         # Random horizontal flip for data augmentation
+        ])
+        return transform
+    else:
+        transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Grayscale(num_output_channels=1),
+        transforms.Normalize(mean=[0.5], std=[0.5]),
+        transforms.RandomHorizontalFlip()
+        ])
+        return transform
+        
 
 def plot_losses(model_name, num_epochs, train_losses, val_losses, final_test_accuracy):
     """
@@ -174,7 +194,7 @@ def train_model(model, model_name, num_epochs, criterion, train_data_loader, val
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=HELP_DESCRIPTION, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--numepochs', help="Number of epochs to train the model for", default=15)
-    parser.add_argument('--modeltype', choices=['pretrained_resnet18', 'modified_resnet18'], help="Choose either pretrained Resnet18 or pre-trained Resnet18 with additional convolution layers")
+    parser.add_argument('--modeltype', choices=['pretrained_resnet18', 'modified_resnet18', 'custom_cnn'], help="Choose either pretrained Resnet18, pre-trained Resnet18 with additional convolution layers, or custom cnn")
 
     args = parser.parse_args()
     num_epochs = int(args.numepochs)
@@ -184,17 +204,25 @@ if __name__ == "__main__":
 
     if model_type == 'pretrained_resnet18':
         model = get_pretrained_resnet18_model()
-    else:
+    elif model_type == 'modified_resnet18':
         model = get_extended_resnet18_model()
- 
+    else:
+        model = get_custom_cnn()
+
+    transform = get_transform(model_type)
+
     print(model)
 
-    optimizer = optim.Adam(model.fc.parameters(), lr=0.001, weight_decay=1e-5)
+    if "resnet18" in model_type:
+        optimizer = optim.Adam(model.fc.parameters(), lr=0.001, weight_decay=1e-5)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+
     criterion = nn.CrossEntropyLoss()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    train_loader, val_loader, test_loader = load_data()
+    train_loader, val_loader, test_loader = load_data(transform)
 
     torch.manual_seed(7)
     train_model(model, model_type, num_epochs, criterion, train_loader, val_loader, test_loader, device)
